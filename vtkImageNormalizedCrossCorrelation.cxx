@@ -12,6 +12,8 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
+// http://www.mathworks.com/help/toolbox/images/ref/normxcorr2.html
+// http://www.mathworks.com/help/toolbox/images/ref/corr2.html
 
 #include "vtkImageNormalizedCrossCorrelation.h"
 
@@ -25,6 +27,7 @@
 #include "vtkImageAppendComponents.h"
 #include "vtkImageShiftScale.h"
 #include "vtkImageMathematics.h"
+#include "vtkExtractVOI.h"
 
 #include <vector>
 
@@ -54,82 +57,58 @@ int vtkImageNormalizedCrossCorrelation::RequestData(vtkInformation *vtkNotUsed(r
   vtkImageData *output = vtkImageData::SafeDownCast(
       outInfo->Get(vtkDataObject::DATA_OBJECT()));
 
-  // Cast both images to double
-  vtkSmartPointer<vtkImageCast> image1CastFilter =
-    vtkSmartPointer<vtkImageCast>::New();
-  image1CastFilter->SetInputConnection(input1->GetProducerPort());
-  image1CastFilter->SetOutputScalarTypeToDouble();
-  image1CastFilter->Update();
-
-  vtkSmartPointer<vtkImageData> image1 =
-    vtkSmartPointer<vtkImageData>::New();
-  image1->DeepCopy(image1CastFilter->GetOutput());
-
-  vtkSmartPointer<vtkImageCast> image2CastFilter =
-    vtkSmartPointer<vtkImageCast>::New();
-  image2CastFilter->SetInputConnection(input2->GetProducerPort());
-  image2CastFilter->SetOutputScalarTypeToDouble();
-  image2CastFilter->Update();
-
-  vtkSmartPointer<vtkImageData> image2 =
-    vtkSmartPointer<vtkImageData>::New();
-  image2->DeepCopy(image2CastFilter->GetOutput());
-
-  // http://www.mathworks.com/help/toolbox/images/ref/normxcorr2.html
-
-  // Compute and subtract the mean from both images
-  SubtractMean(image1);
-  SubtractMean(image2);
 
   return 1;
 }
 
 double vtkImageNormalizedCrossCorrelation::SubtractMean(vtkImageData* image)
 {
-  std::vector<vtkSmartPointer<vtkImageData> > normalizedComponents;
+  // This function expects the image type to be double and to have 1 scalar component
 
-  for(vtkIdType c = 0; c < image->GetNumberOfScalarComponents(); c++)
+  vtkSmartPointer<vtkImageData> input =
+    vtkSmartPointer<vtkImageData>::New();
+  input->DeepCopy(image);
+
+  if(image->GetNumberOfScalarComponents() > 1)
     {
-    vtkSmartPointer<vtkImageExtractComponents> extractComponentFilter =
-      vtkSmartPointer<vtkImageExtractComponents>::New();
-    extractComponentFilter->SetInputConnection(image->GetProducerPort());
-    extractComponentFilter->SetComponents(c);
-    extractComponentFilter->Update();
-
-    vtkSmartPointer<vtkImageData> component =
-      vtkSmartPointer<vtkImageData>::New();
-    component->DeepCopy(extractComponentFilter->GetOutput());
-
-    double mean = ComputeMean(component);
-
-    vtkSmartPointer<vtkImageShiftScale> shiftScaleFilter =
-      vtkSmartPointer<vtkImageShiftScale>::New();
-    shiftScaleFilter->SetOutputScalarTypeToUnsignedChar();
-    shiftScaleFilter->SetInputConnection(component->GetProducerPort());
-    shiftScaleFilter->SetShift(-mean);
-    shiftScaleFilter->Update();
-
-    vtkSmartPointer<vtkImageData> shiftedComponent =
-      vtkSmartPointer<vtkImageData>::New();
-    shiftedComponent->DeepCopy(shiftScaleFilter->GetOutput());
-
-    normalizedComponents.push_back(shiftedComponent);
+    std::cerr << "Input to ComputeMean must be 1 component!" << std::endl;
+    return -1;
     }
 
-  vtkSmartPointer<vtkImageAppendComponents> appendFilter =
-    vtkSmartPointer<vtkImageAppendComponents>::New();
-  for(vtkIdType c = 0; c < image->GetNumberOfScalarComponents(); c++)
+  if(image->GetScalarType() != VTK_DOUBLE)
     {
-    appendFilter->AddInputConnection(0, normalizedComponents[c]->GetProducerPort());
+    std::cerr << "Input to ComputeMean must have scalar type double!" << std::endl;
+    return -1;
     }
-  appendFilter->Update();
+    
+  double mean = ComputeMean(image);
 
-  image->DeepCopy(appendFilter->GetOutput());
+  vtkSmartPointer<vtkImageShiftScale> shiftScaleFilter =
+    vtkSmartPointer<vtkImageShiftScale>::New();
+  shiftScaleFilter->SetOutputScalarTypeToUnsignedChar();
+  shiftScaleFilter->SetInputConnection(input->GetProducerPort());
+  shiftScaleFilter->SetShift(-mean);
+  shiftScaleFilter->Update();
+
+  image->DeepCopy(shiftScaleFilter->GetOutput());
 }
 
 double vtkImageNormalizedCrossCorrelation::ComputeMean(vtkImageData* image)
 {
   // This function expects the image type to be double and to have 1 scalar component
+  
+  if(image->GetNumberOfScalarComponents() > 1)
+    {
+    std::cerr << "Input to ComputeMean must be 1 component!" << std::endl;
+    return -1;
+    }
+
+  if(image->GetScalarType() != VTK_DOUBLE)
+    {
+    std::cerr << "Input to ComputeMean must have scalar type double!" << std::endl;
+    return -1;
+    }
+  
   int extent[6];
   image->GetExtent(extent);
 
@@ -152,48 +131,152 @@ double vtkImageNormalizedCrossCorrelation::ComputeMean(vtkImageData* image)
   return pixelSum/static_cast<double>(pixelCount);
 }
 
-void vtkImageNormalizedCrossCorrelation::CrossCorrelation(vtkImageData* image, vtkImageData* patch, vtkImageData* output)
+
+void vtkImageNormalizedCrossCorrelation::CrossCorrelationColor(vtkImageData* image, vtkImageData* patch, vtkImageData* output)
 {
-  // http://www.mathworks.com/help/toolbox/images/ref/normxcorr2.html
+  // This should be moved to RequestData
 
-  vtkSmartPointer<vtkImageData> normalizedImage =
-    vtkSmartPointer<vtkImageData>::New();
-  NormalizeImage(image, normalizedImage);
+  std::vector<vtkSmartPointer<vtkImageData> > outputComponents;
 
+  vtkSmartPointer<vtkImageAppendComponents> appendFilter =
+    vtkSmartPointer<vtkImageAppendComponents>::New();
+    
+  for(vtkIdType c = 0; c < image->GetNumberOfScalarComponents(); c++)
+    {
+    std::cout << "Computing correlation of component " << c << "..." << std::endl;
+  
+    outputComponents.push_back(vtkSmartPointer<vtkImageData>::New());
+  
+    vtkSmartPointer<vtkImageExtractComponents> imageExtractComponents =
+      vtkSmartPointer<vtkImageExtractComponents>::New();
+    imageExtractComponents->SetInputConnection(image->GetProducerPort());
+    imageExtractComponents->SetComponents(c);
+    imageExtractComponents->Update();
+
+    vtkSmartPointer<vtkImageExtractComponents> patchExtractComponents =
+      vtkSmartPointer<vtkImageExtractComponents>::New();
+    patchExtractComponents->SetInputConnection(patch->GetProducerPort());
+    patchExtractComponents->SetComponents(c);
+    patchExtractComponents->Update();
+
+    CrossCorrelationGreyscale(imageExtractComponents->GetOutput(), patchExtractComponents->GetOutput(), outputComponents[c]);
+    appendFilter->AddInputConnection(0, outputComponents[c]->GetProducerPort());
+    }
+
+  appendFilter->Update();
+
+  output->ShallowCopy(appendFilter->GetOutput());
+}
+
+void vtkImageNormalizedCrossCorrelation::CrossCorrelationGreyscale(vtkImageData* image, vtkImageData* patch, vtkImageData* output)
+{
+  if(image->GetNumberOfScalarComponents() > 1)
+    {
+    std::cerr << "Input to ComputeMean must be 1 component!" << std::endl;
+    return;
+    }
+
+  output->SetExtent(image->GetExtent());
+
+  int patchDimensions[6];
+  patch->GetDimensions(patchDimensions);
+
+  int imageExtent[6];
+  image->GetExtent(imageExtent);
+
+  // Cast the image and the patch to doubles
+  vtkSmartPointer<vtkImageCast> imageCastFilter =
+    vtkSmartPointer<vtkImageCast>::New();
+  imageCastFilter->SetInputConnection(image->GetProducerPort());
+  imageCastFilter->SetOutputScalarTypeToDouble();
+  imageCastFilter->Update();
+
+  vtkSmartPointer<vtkImageCast> patchCastFilter =
+    vtkSmartPointer<vtkImageCast>::New();
+  patchCastFilter->SetInputConnection(patch->GetProducerPort());
+  patchCastFilter->SetOutputScalarTypeToDouble();
+  patchCastFilter->Update();
+
+  // Normalize the patch
   vtkSmartPointer<vtkImageData> normalizedPatch =
     vtkSmartPointer<vtkImageData>::New();
-  NormalizeImage(patch, normalizedPatch);
-
-  vtkSmartPointer<vtkImageMathematics> squareImage =
-    vtkSmartPointer<vtkImageMathematics>::New();
-  squareImage->SetOperationToSquare();
-  squareImage->SetInput(normalizedImage);
-  squareImage->Update();
+  normalizedPatch->DeepCopy(patchCastFilter->GetOutput());
+  //NormalizeImage(normalizedPatch);
+  SubtractMean(normalizedPatch);
 
   vtkSmartPointer<vtkImageMathematics> squarePatch =
     vtkSmartPointer<vtkImageMathematics>::New();
   squarePatch->SetOperationToSquare();
-  squarePatch->SetInput(normalizedPatch);
+  squarePatch->SetInputConnection(normalizedPatch->GetProducerPort());
   squarePatch->Update();
+
+  double patchSquareSum = PixelSum(squarePatch->GetOutput());
+  
+  // (i,j) is the current center of the kernel
+  /*
+  for(int i = imageExtent[0] + patchDimensions[0]; i < imageExtent[1] - patchDimensions[0]; i++)
+    {
+    for(int j = imageExtent[2] + patchDimensions[1]; j < imageExtent[3] - patchDimensions[1]; j++)
+      {
+      */
+  for(int i = 10; i < 20; i++)
+    {
+    for(int j = 10; j < 11; j++)
+      {
+      std::cout << "(" << i << " , " << j << ")" << std::endl;
+      // Extract relevant region of image1Info
+      vtkSmartPointer<vtkExtractVOI> extractVOI =
+        vtkSmartPointer<vtkExtractVOI>::New();
+      extractVOI->SetInputConnection(imageCastFilter->GetOutputPort());
+      extractVOI->SetVOI(i - patchDimensions[0]/2, i + patchDimensions[0]/2,
+                         j - patchDimensions[1]/2, j + patchDimensions[1]/2, 0, 0);
+      extractVOI->Update();
+      
+      // Normalize extracted region of the image
+      vtkSmartPointer<vtkImageData> normalizedImage =
+        vtkSmartPointer<vtkImageData>::New();
+      normalizedImage->DeepCopy(imageCastFilter->GetOutput());
+      //NormalizeImage(normalizedImage);
+      SubtractMean(normalizedImage);
+
+      // Compute numerator of corr2 equation
+      vtkSmartPointer<vtkImageMathematics> multiply =
+        vtkSmartPointer<vtkImageMathematics>::New();
+      multiply->SetOperationToMultiply();
+      multiply->SetInput1(normalizedPatch);
+      multiply->SetInput2(normalizedImage);
+      multiply->Update();
+
+      double numeratorSum = PixelSum(multiply->GetOutput());
+      
+      // Square the image and the patch
+      vtkSmartPointer<vtkImageMathematics> squareImage =
+        vtkSmartPointer<vtkImageMathematics>::New();
+      squareImage->SetOperationToSquare();
+      squareImage->SetInputConnection(normalizedImage->GetProducerPort());
+      squareImage->Update();
+
+      double imageSquareSum = PixelSum(squareImage->GetOutput());
+      
+      double correlation = sqrt(imageSquareSum * patchSquareSum);
+
+      double* pixel = static_cast<double*>(output->GetScalarPointer(i,j,0));
+      pixel[0] = correlation;
+      }
+    }
+  
 }
 
-void vtkImageNormalizedCrossCorrelation::NormalizeImage(vtkImageData* input, vtkImageData* output)
+void vtkImageNormalizedCrossCorrelation::NormalizeImage(vtkImageData* image)
 {
-  // Cast both images to double
-  vtkSmartPointer<vtkImageCast> imageCastFilter =
-    vtkSmartPointer<vtkImageCast>::New();
-  imageCastFilter->SetInputConnection(input->GetProducerPort());
-  imageCastFilter->SetOutputScalarTypeToDouble();
-  imageCastFilter->Update();
-
-  vtkSmartPointer<vtkImageData> doubleImage =
+  vtkSmartPointer<vtkImageData> input =
     vtkSmartPointer<vtkImageData>::New();
-  doubleImage->DeepCopy(imageCastFilter->GetOutput());
+  input->DeepCopy(image);
 
   // Compute and subtract the mean
-  SubtractMean(doubleImage);
+  SubtractMean(input);
 
-  output->ShallowCopy(doubleImage);
+  image->ShallowCopy(input);
 }
 
 double vtkImageNormalizedCrossCorrelation::PixelSum(vtkImageData* image)

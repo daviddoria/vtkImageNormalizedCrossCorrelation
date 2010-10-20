@@ -42,13 +42,23 @@ int main(int argc, char *argv[])
     vtkSmartPointer<vtkImageData>::New();
   patch->DeepCopy(extractPatch->GetOutput());
 
+  /* Filter-style
   vtkSmartPointer<vtkImageNormalizedCrossCorrelation> normalizedCorrelationFilter =
     vtkSmartPointer<vtkImageNormalizedCrossCorrelation>::New();
   normalizedCorrelationFilter->SetInputConnection(0, reader->GetOutputPort());
   //normalizedCorrelationFilter->SetInputConnection(1, extractPatch->GetOutputPort());
   normalizedCorrelationFilter->SetInputConnection(1, patch->GetProducerPort());
   normalizedCorrelationFilter->Update();
+  */
 
+  // Function-style
+  vtkSmartPointer<vtkImageData> correlationImage =
+    vtkSmartPointer<vtkImageData>::New();
+    
+  vtkSmartPointer<vtkImageNormalizedCrossCorrelation> normalizedCorrelationFilter =
+    vtkSmartPointer<vtkImageNormalizedCrossCorrelation>::New();
+  normalizedCorrelationFilter->CrossCorrelationColor(reader->GetOutput(), extractPatch->GetOutput(), correlationImage);
+  
   vtkSmartPointer<vtkImageActor> normalizedCorrelationActor =
     vtkSmartPointer<vtkImageActor>::New();
   normalizedCorrelationActor->SetInput(normalizedCorrelationFilter->GetOutput());

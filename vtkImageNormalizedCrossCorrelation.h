@@ -32,13 +32,17 @@ public:
   int RequestData(vtkInformation *, vtkInformationVector **, vtkInformationVector *);
 
   // Description:
-  // This function performs the normalization. It should be done in RequestData,
+  // This function performs normalized cross correlation. It should be done in RequestData,
   // but currently having trouble with pipeline (whole extents, etc)
-  void CrossCorrelation(vtkImageData* image, vtkImageData* patch, vtkImageData* output);
+  void CrossCorrelationColor(vtkImageData* image, vtkImageData* patch, vtkImageData* output);
 
 protected:
   vtkImageNormalizedCrossCorrelation();
 
+  // Description:
+  // Normalized cross correlation of a single component image
+  void CrossCorrelationGreyscale(vtkImageData* image, vtkImageData* patch, vtkImageData* output);
+  
   // Description:
   // This function computes the sum of all pixels in an image.
   double PixelSum(vtkImageData*);
@@ -49,7 +53,7 @@ protected:
 
   // Description:
   // This function computes and subtracts the mean from an image.
-  void NormalizeImage(vtkImageData* input, vtkImageData* output);
+  void NormalizeImage(vtkImageData* input);
 
   // Description:
   // This function subtracts the mean from the image. This is done one
